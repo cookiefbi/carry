@@ -4,7 +4,8 @@
 #  VLESS + Reality (Xray-core), по желанию Hysteria2. Без веб-панели.
 #
 #  Установка (Ubuntu 22.04 / 24.04, от root):
-#    bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install.sh)
+#    bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/v1.0.0/install.sh)
+#  Обновление уже установленного сервера:  carry update
 #
 #  Лицензия: MIT
 # =============================================================================
@@ -24,6 +25,9 @@ carry_vars() {
   CARRY_LOG="/var/log/carry.log"
   CARRY_BIN="/usr/local/bin/carry"
   CARRY_LOCK="/run/carry.lock"
+  CARRY_REPO="https://github.com/cookiefbi/carry"
+  CARRY_RAW="https://raw.githubusercontent.com/cookiefbi/carry"
+  F2B_JAIL="/etc/fail2ban/jail.d/carry.local"
 
   XRAY_BIN="/usr/local/bin/xray"
   XRAY_DIR="/usr/local/etc/xray"
@@ -238,7 +242,7 @@ load_state() {
   [[ -f $CARRY_CONF ]] || return 1
   # shellcheck disable=SC1090
   . "$CARRY_CONF"
-  : "${SERVER_HOST:=}" "${SNI:=}" "${PRIVATE_KEY:=}" "${PUBLIC_KEY:=}" "${HY2:=0}" "${HY2_OBFS:=}"
+  : "${SERVER_HOST:=}" "${HOST_MANUAL:=0}" "${SNI:=}" "${PRIVATE_KEY:=}" "${PUBLIC_KEY:=}" "${HY2:=0}" "${HY2_OBFS:=}"
   touch "$CARRY_CLIENTS"
   return 0
 }
@@ -251,6 +255,7 @@ save_state() {
     {
       echo "# Carry $CARRY_VERSION — состояние сервера. Не публикуйте этот файл."
       printf 'SERVER_HOST=%q\n' "$SERVER_HOST"
+      printf 'HOST_MANUAL=%q\n' "$HOST_MANUAL"
       printf 'SNI=%q\n' "$SNI"
       printf 'PRIVATE_KEY=%q\n' "$PRIVATE_KEY"
       printf 'PUBLIC_KEY=%q\n' "$PUBLIC_KEY"
@@ -518,10 +523,14 @@ disable_hy2() {
 #  Защита сервера
 # ----------------------------------------------------------------------------
 
+# Порты, на которых реально слушает SSH (плюс 22 на всякий случай).
+ssh_ports() {
+  { echo 22; ss -Htlnp 2>/dev/null | awk '/"sshd"/ {n=split($4,a,":"); print a[n]}'; } | sort -un
+}
+
 setup_firewall() {
-  local hy2=$1 p ports
-  ports=$(ss -Htlnp 2>/dev/null | awk '/"sshd"/ {n=split($4,a,":"); print a[n]}' | sort -u)
-  for p in 22 $ports; do
+  local hy2=$1 p
+  for p in $(ssh_ports); do
     run ufw allow "$p/tcp" || return 1
   done
   run ufw allow 443/tcp || return 1
@@ -540,6 +549,30 @@ net.core.wmem_max = 16777216
 EOF
   run sysctl --system || true
   [[ $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null) == bbr ]]
+}
+
+# fail2ban: блокирует IP после нескольких неверных паролей SSH.
+# Вход по паролю оставляем (иначе новичок запрёт себя), а перебор отсекаем.
+setup_fail2ban() {
+  local ports backend_line=""
+  ports=$(ssh_ports | paste -sd, -)
+  # На Ubuntu с rsyslog есть /var/log/auth.log; без него читаем journald.
+  [[ -f /var/log/auth.log ]] || backend_line="backend = systemd"
+  mkdir -p "$(dirname "$F2B_JAIL")"
+  cat >"$F2B_JAIL" <<EOF
+# Создано Carry: защита SSH от подбора пароля.
+# После 6 неудачных входов за 10 минут IP блокируется на 30 минут.
+[sshd]
+enabled = true
+port = $ports
+maxretry = 6
+findtime = 10m
+bantime = 30m
+ignoreip = 127.0.0.1/8 ::1
+$backend_line
+EOF
+  restart_service fail2ban || return 1
+  run fail2ban-client status sshd
 }
 
 setup_autoupdates() {
@@ -600,6 +633,7 @@ commands_text() {
   carry list             все устройства
   carry remove <имя>     отключить устройство
   carry share [имя]      короткая ссылка, если QR не сканируется
+  carry update           обновить Carry, Xray и Hysteria2
   carry uninstall        удалить всё
 EOF
 }
@@ -708,9 +742,10 @@ Carry $CARRY_VERSION — личный VPN-сервер одной командо
 
   --hy2          добавить запасной протокол Hysteria2 (443/udp)
   --no-hy2       выключить Hysteria2
-  --sni сайт     сайт для маскировки, например www.apple.com
+  --sni сайт     сайт для маскировки, например www.nvidia.com
   --name имя     имя первого устройства (латиница, цифры, - и _)
   --host адрес   свой домен или IP вместо автоматически найденного
+                 (--host auto — снова определять IP автоматически)
   --force        запускать даже не на Ubuntu 22.04/24.04
 
 $(commands_text)
@@ -719,13 +754,14 @@ EOF
 
 cmd_install() {
   local opt_hy2="" opt_sni="" opt_name="main" opt_host="" force=0 first_run=1 d who
+  local old_host="" new_ip=""
 
   while (($#)); do
     case "$1" in
       --hy2|--hysteria|--hysteria2) opt_hy2=1 ;;
       --no-hy2) opt_hy2=0 ;;
       --sni|--site|--dest|--target)
-        [[ -n ${2:-} ]] || die "После $1 укажите сайт, например: $1 www.apple.com"
+        [[ -n ${2:-} ]] || die "После $1 укажите сайт, например: $1 www.nvidia.com"
         opt_sni=$(normalize_domain "$2"); shift ;;
       --sni=*) opt_sni=$(normalize_domain "${1#*=}") ;;
       --name)
@@ -752,7 +788,7 @@ cmd_install() {
   printf '\n%sCarry %s%s — личный VPN-сервер. Займёт 1–3 минуты, вопросов не будет.\n\n' "$B" "$CARRY_VERSION" "$N"
 
   check_os "$force"
-  [[ -n $opt_sni ]] && ! valid_domain "$opt_sni" && die "«$opt_sni» не похоже на адрес сайта. Пример: --sni www.apple.com"
+  [[ -n $opt_sni ]] && ! valid_domain "$opt_sni" && die "«$opt_sni» не похоже на адрес сайта. Пример: --sni www.nvidia.com"
   valid_name "$opt_name" || die "Имя «$opt_name» не подходит: только латиница, цифры, - и _, до 32 символов."
 
   if load_state; then
@@ -760,7 +796,7 @@ cmd_install() {
     say "Carry уже установлен — проверяю и обновляю. Ключи и устройства сохраняются."
     echo
   else
-    SERVER_HOST=""; SNI=""; PRIVATE_KEY=""; PUBLIC_KEY=""; HY2=0; HY2_OBFS=""
+    SERVER_HOST=""; HOST_MANUAL=0; SNI=""; PRIVATE_KEY=""; PUBLIC_KEY=""; HY2=0; HY2_OBFS=""
     mkdir -p "$CARRY_DIR"; chmod 700 "$CARRY_DIR"
     : >"$CARRY_CLIENTS"; chmod 600 "$CARRY_CLIENTS"
   fi
@@ -769,22 +805,41 @@ cmd_install() {
   check_ports "$HY2"
 
   step "Устанавливаю нужные программы"
-  apt_install curl ca-certificates openssl qrencode ufw unattended-upgrades python3 iproute2 kbd \
+  apt_install curl ca-certificates openssl qrencode ufw unattended-upgrades python3 iproute2 kbd fail2ban \
     || die "Не удалось установить пакеты. Проверьте интернет на сервере и повторите."
   ok
 
+  # Адрес определяется при каждом запуске: хостер может выдать новый IP
+  # (например, после переезда в другой дата-центр). Адрес, заданный вручную
+  # через --host, не трогаем, пока не скажут --host auto.
   step "Определяю адрес сервера"
-  if [[ -n $opt_host ]]; then
+  old_host=$SERVER_HOST
+  if [[ -n $opt_host && $opt_host != auto ]]; then
     SERVER_HOST=$opt_host
-  elif [[ -z $SERVER_HOST ]]; then
-    SERVER_HOST=$(detect_ip) || die "Не удалось узнать внешний IP-адрес. Укажите его вручную: --host 1.2.3.4"
+    HOST_MANUAL=1
+  elif [[ $HOST_MANUAL == 1 && -n $SERVER_HOST && $opt_host != auto ]]; then
+    :
+  else
+    HOST_MANUAL=0
+    if new_ip=$(detect_ip); then
+      # IPv4 не ответил, а IPv6 ответил — скорее всего, временный сбой: не меняем.
+      if [[ -n $old_host && $old_host != *:* && $new_ip == *:* ]]; then
+        warn "Не удалось проверить IPv4-адрес, оставляю прежний: $old_host"
+      else
+        SERVER_HOST=$new_ip
+      fi
+    elif [[ -n $old_host ]]; then
+      warn "Не удалось проверить внешний IP, оставляю прежний: $old_host"
+    else
+      die "Не удалось узнать внешний IP-адрес. Укажите его вручную: --host 1.2.3.4"
+    fi
   fi
   ok "$SERVER_HOST"
 
   step "Выбираю сайт для маскировки"
   if [[ -n $opt_sni ]]; then
     sni_ok "$opt_sni" || die "Сайт $opt_sni не подходит: с сервера он не открывается по TLS 1.3 + HTTP/2.
-Выберите другой (например www.apple.com) или запустите без --sni."
+Выберите другой (например www.nvidia.com) или запустите без --sni."
     SNI=$opt_sni
   elif [[ -z $SNI ]]; then
     if ! SNI=$(pick_sni); then
@@ -839,6 +894,9 @@ cmd_install() {
   setup_autoupdates
   ok
 
+  step "Включаю защиту SSH от подбора пароля (fail2ban)"
+  if setup_fail2ban; then ok; else ok "не запустился, пропускаю (подробности в журнале)"; fi
+
   install_self || warn "Не удалось создать команду carry в $CARRY_BIN."
   save_state
 
@@ -848,6 +906,12 @@ cmd_install() {
 
   log "Установка завершена (первый запуск: $first_run)"
   banner_done
+  if [[ -n $old_host && $old_host != "$SERVER_HOST" ]]; then
+    log "Адрес сервера сменился: $old_host -> $SERVER_HOST"
+    printf '%s%s!!! Адрес сервера сменился: был %s, стал %s.%s\n' "$Y" "$B" "$old_host" "$SERVER_HOST" "$N"
+    printf '%sСтарые ссылки и QR-коды больше не работают. Отсканируйте новый QR на КАЖДОМ устройстве:%s\n' "$Y" "$N"
+    printf '%s  carry list — список устройств, carry show <имя> — QR для каждого.%s\n\n' "$Y" "$N"
+  fi
   d=$(first_client)
   print_summary "$d"
 }
@@ -935,8 +999,9 @@ cmd_list() {
 
 # Запасной вариант, если QR не сканируется: короткая временная ссылка.
 # Поднимает на 15 минут крошечный веб-сервер на случайном порту.
-# Ссылки отдаются в base64 (формат «подписки»), а в браузере — страницей,
-# где ссылка собирается уже на телефоне. Так текст vless:// не идёт по сети открыто.
+# Ссылки отдаются в base64 (формат «подписки»), а в браузере — страницей.
+# ВАЖНО: это обычный HTTP без шифрования, а base64 — не шифрование: кто видит
+# трафик, прочитает ключи. Поэтому команда честно об этом предупреждает.
 cmd_share() {
   local name=${1:-} port token tmp links png ufw_on=0 l
   name=${name,,}
@@ -1011,6 +1076,10 @@ EOF
 Если хостер включил свой файрвол в панели, порт $port может быть закрыт.
 Когда устройство подключится, нажмите Ctrl+C. Ссылка перестанет работать.
 EOF
+  printf '\n%sВажно:%s ссылка работает по обычному HTTP, без шифрования. Тот, кто видит\n' "$Y$B" "$N"
+  printf 'ваш трафик (например, провайдер), может прочитать из неё ключи от сервера.\n'
+  printf 'Открывайте её дома или до поездки, но не из страны с жёсткой интернет-цензурой:\n'
+  printf 'там сервер могут заметить и заблокировать. Безопаснее всего — QR-код с экрана.\n'
   echo
   log "carry share: устройство $name, порт $port"
   python3 - "$port" "$token" "$tmp/sub" "$tmp/page" "$SHARE_TTL" <<'PY'
@@ -1071,6 +1140,31 @@ print('Ссылка закрыта.')
 PY
 }
 
+# Обновление: берём install.sh из последнего релиза (не из ветки main —
+# туда может попасть непроверенный код) и запускаем установку заново.
+# Ключи, устройства и настройки сохраняются.
+cmd_update() {
+  local url tag tmp
+  require_root
+  init_log
+  need_installed
+  step "Ищу последнюю версию Carry"
+  url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' --max-time 20 "$CARRY_REPO/releases/latest" 2>/dev/null) \
+    || die "Не удалось связаться с GitHub. Проверьте интернет на сервере."
+  tag=${url##*/}
+  [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Не удалось узнать последнюю версию Carry на GitHub."
+  ok "$tag (сейчас v$CARRY_VERSION)"
+  step "Скачиваю Carry $tag"
+  tmp=$(mktemp /tmp/carry-XXXXXX.sh)
+  curl -fsSL --max-time 60 "$CARRY_RAW/$tag/install.sh" -o "$tmp" || die "Не удалось скачать Carry $tag."
+  if ! bash -n "$tmp" || ! grep -q 'carry_vars()' "$tmp"; then
+    die "Скачанный файл повреждён. Повторите позже."
+  fi
+  ok
+  log "carry update: запускаю установку из $tag"
+  exec bash "$tmp" install "$@"
+}
+
 cmd_uninstall() {
   local yes=0 a
   [[ ${1:-} == -y || ${1:-} == --yes ]] && yes=1
@@ -1113,6 +1207,7 @@ cmd_uninstall() {
   ok
 
   rm -rf "$CARRY_DIR" "$CARRY_TXT" /etc/sysctl.d/99-carry.conf
+  if [[ -f $F2B_JAIL ]]; then rm -f "$F2B_JAIL"; run systemctl restart fail2ban || true; fi
   rm -f "$CARRY_BIN"
   log "Carry удалён"
   echo
@@ -1134,6 +1229,7 @@ main() {
     list|ls)             cmd_list ;;
     remove|rm|del|delete) shift; cmd_remove "$@" ;;
     share|link)          shift; cmd_share "$@" ;;
+    update|upgrade)      shift; cmd_update "$@" ;;
     uninstall)           shift; cmd_uninstall "$@" ;;
     *)                   die "Неизвестная команда «$cmd». Справка: carry help" ;;
   esac

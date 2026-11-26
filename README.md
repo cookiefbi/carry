@@ -11,13 +11,13 @@ Carry ставит на чистый сервер Ubuntu протокол VLESS 
 3. Вставьте одну команду и нажмите Enter:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/v1.0.0/install.sh)
 ```
 
 С запасным протоколом Hysteria2:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install.sh) --hy2
+bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/v1.0.0/install.sh) --hy2
 ```
 
 Вопросов не будет. Через 1–3 минуты на экране появятся крупное «ГОТОВО», QR-код и ссылки. То же самое сохраняется в файл `/root/carry.txt`.
@@ -39,7 +39,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install
 Так бывает в веб-консоли хостера (маленький экран, нет нужных символов) или если вы устанавливали с того же телефона.
 
 - `carry show` — показать QR ещё раз. В веб-консоли Carry уменьшает шрифт, чтобы код поместился целиком.
-- `carry share` — **короткая временная ссылка** вида `http://1.2.3.4:23817/a1b2c3`. Её легко набрать вручную. Откройте её в браузере телефона и нажмите «Скопировать», либо добавьте в приложение как подписку. Ссылка живёт 15 минут или до Ctrl+C. Сама ссылка `vless://` по сети открытым текстом не передаётся.
+- `carry share` — **короткая временная ссылка** вида `http://1.2.3.4:23817/a1b2c3`. Её легко набрать вручную. Откройте её в браузере телефона и нажмите «Скопировать», либо добавьте в приложение как подписку. Ссылка живёт 15 минут или до Ctrl+C.
+  **Внимание:** ссылка работает по обычному HTTP, без шифрования. Кодировка base64 — не защита: тот, кто видит ваш трафик, прочитает из неё ключи от сервера. Пользуйтесь `carry share` дома или до поездки, но не из страны с жёсткой интернет-цензурой. Безопаснее всего — QR-код с экрана.
 - `cat /root/carry.txt` — все ссылки текстом.
 
 ## Команды
@@ -50,7 +51,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install
 | `carry add <имя>` | ещё одно устройство или человек, у каждого свои ключи |
 | `carry list` | список устройств |
 | `carry remove <имя>` | отключить устройство |
-| `carry share [имя]` | короткая временная ссылка |
+| `carry share [имя]` | короткая временная ссылка (без шифрования, см. выше) |
+| `carry update` | обновить Carry, Xray и Hysteria2 до последнего релиза |
 | `carry uninstall` | удалить всё |
 
 Имена пишутся латиницей: `mama`, `phone`, `laptop-2`.
@@ -63,10 +65,22 @@ bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install
 | `--no-hy2` | выключить Hysteria2 |
 | `--sni сайт` | сайт, под который маскируется Reality. По умолчанию берётся первый рабочий из `www.samsung.com`, `www.nvidia.com`, `www.intel.com`, `www.oracle.com` |
 | `--name имя` | имя первого устройства (по умолчанию `main`) |
-| `--host адрес` | свой домен или IP вместо найденного автоматически |
+| `--host адрес` | свой домен или IP вместо найденного автоматически (`--host auto` — снова определять сам) |
 | `--force` | запускать не на Ubuntu 22.04/24.04 (на свой риск) |
 
-Повторный запуск безопасен. Ключи и устройства сохраняются, Xray и Hysteria2 обновляются, настройки перезаписываются начисто. Так же включается Hysteria2 позже: просто запустите команду ещё раз с `--hy2`.
+Повторный запуск безопасен. Ключи и устройства сохраняются, Xray и Hysteria2 обновляются, настройки перезаписываются начисто. Так же включается Hysteria2 позже: `carry update --hy2`.
+
+## Обновление
+
+```bash
+carry update
+```
+
+Скачивает Carry из **последнего релиза** (не из ветки `main`), обновляет Xray и Hysteria2 и заново применяет настройки. Ключи и устройства сохраняются.
+
+## Сменился IP сервера
+
+Некоторые хостеры дают переехать в другой дата-центр, и тогда у сервера новый IP. Выполните `carry update`: Carry сам заметит новый адрес и предупредит. После этого **заново отсканируйте QR на каждом устройстве** (`carry list`, затем `carry show <имя>`): старые ссылки указывают на старый адрес.
 
 ## Что делает скрипт
 
@@ -78,6 +92,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install
 - **ufw**: открыты SSH (22 и порт, на котором реально работает sshd), 443/tcp и, с `--hy2`, 443/udp.
 - **BBR** и увеличенные UDP-буферы для Hysteria2.
 - **unattended-upgrades**: автоматические обновления безопасности.
+- **fail2ban**: после 6 неверных паролей SSH за 10 минут IP блокируется на 30 минут. Вход по паролю остаётся, чтобы вы не заперли себя, а подбор пароля отсекается. Если заблокировали вас самих, зайдите через веб-консоль хостера или подождите 30 минут.
 - Журнал всех действий: `/var/log/carry.log`. Состояние: `/etc/carry/`.
 
 ## Если что-то пошло не так
@@ -90,8 +105,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install
 
 ## Безопасность
 
+- Команда установки указывает на конкретную версию (`v1.0.0`), а не на ветку `main`. Так вы запускаете проверенный релиз, а не то, что лежит в репозитории прямо сейчас.
 - `/root/carry.txt` и `/etc/carry/` доступны только root. По ссылкам из них можно подключиться к серверу, так что не публикуйте их.
 - У Hysteria2 самоподписанный сертификат, поэтому в ссылке стоит `insecure=1`. Это стандартная схема для личного сервера без домена. Основной протокол (Reality) от этого не зависит.
+- `carry share` работает без шифрования (см. раздел «QR не сканируется?»).
 
 ## Лицензия
 
@@ -114,13 +131,13 @@ Carry turns a fresh Ubuntu VPS into a VLESS + Reality (Xray-core) server, option
 3. Paste one command:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/v1.0.0/install.sh)
 ```
 
 With the Hysteria2 fallback:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install.sh) --hy2
+bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/v1.0.0/install.sh) --hy2
 ```
 
 It asks no questions. After 1–3 minutes you see a big "ГОТОВО" ("done"), a QR code and the links. Everything is also saved to `/root/carry.txt`. On-screen messages are in Russian.
@@ -138,7 +155,8 @@ Tap "+" → "Scan QR code", or copy the `vless://…` link and use "Import from 
 ## QR code won't scan?
 
 - `carry show` prints the QR code again. In a web KVM console it switches to a smaller font so the code fits on screen.
-- `carry share` prints a **short temporary link** like `http://1.2.3.4:23817/a1b2c3` that is easy to type. Open it in the phone's browser and tap "Copy", or add it to the app as a subscription URL. It stays up for 15 minutes or until Ctrl+C. The `vless://` link itself never travels over the network in plain text.
+- `carry share` prints a **short temporary link** like `http://1.2.3.4:23817/a1b2c3` that is easy to type. Open it in the phone's browser and tap "Copy", or add it to the app as a subscription URL. It stays up for 15 minutes or until Ctrl+C.
+  **Warning:** the link is served over plain HTTP with no encryption. Base64 is not protection: anyone who can see your traffic can read the server keys from it. Use `carry share` at home or before a trip, never from a country with heavy internet censorship. Scanning the QR code off the screen is the safest option.
 - `cat /root/carry.txt` shows all links as text.
 
 ## Commands
@@ -149,7 +167,8 @@ Tap "+" → "Scan QR code", or copy the `vless://…` link and use "Import from 
 | `carry add <name>` | add another device or person, each with their own keys |
 | `carry list` | list devices |
 | `carry remove <name>` | revoke a device |
-| `carry share [name]` | short temporary link |
+| `carry share [name]` | short temporary link (unencrypted, see above) |
+| `carry update` | update Carry, Xray and Hysteria2 to the latest release |
 | `carry uninstall` | remove everything |
 
 ## Install options
@@ -160,10 +179,22 @@ Tap "+" → "Scan QR code", or copy the `vless://…` link and use "Import from 
 | `--no-hy2` | turn Hysteria2 off |
 | `--sni site` | Reality camouflage site. The default is the first one that works from the server out of `www.samsung.com`, `www.nvidia.com`, `www.intel.com`, `www.oracle.com` |
 | `--name name` | name of the first device (default `main`) |
-| `--host addr` | your own domain or IP instead of the auto-detected one |
+| `--host addr` | your own domain or IP instead of the auto-detected one (`--host auto` to go back to auto-detection) |
 | `--force` | run on something other than Ubuntu 22.04/24.04 (at your own risk) |
 
-Re-running is safe. Keys and devices are kept, Xray and Hysteria2 are upgraded, and the configs are rewritten from scratch. To add Hysteria2 later, just run the command again with `--hy2`.
+Re-running is safe. Keys and devices are kept, Xray and Hysteria2 are upgraded, and the configs are rewritten from scratch. To add Hysteria2 later: `carry update --hy2`.
+
+## Updating
+
+```bash
+carry update
+```
+
+Downloads Carry from the **latest release** (not from the `main` branch), upgrades Xray and Hysteria2 and re-applies the configs. Keys and devices are kept.
+
+## Server IP changed
+
+Some providers let you move to another datacenter, which gives the server a new IP. Run `carry update`: Carry detects the new address and warns you. Then **re-scan the QR code on every device** (`carry list`, then `carry show <name>`), because the old links point to the old address.
 
 ## What it does
 
@@ -175,6 +206,8 @@ Re-running is safe. Keys and devices are kept, Xray and Hysteria2 are upgraded, 
 - **ufw**: allows SSH (22 plus whatever port sshd actually listens on), 443/tcp, and 443/udp with `--hy2`.
 - **BBR** plus larger UDP buffers for Hysteria2.
 - **unattended-upgrades** for automatic security updates.
+- **fail2ban**: 6 wrong SSH passwords within 10 minutes ban the IP for 30 minutes. Password login stays on so you cannot lock yourself out, but brute force is cut off.
+- The install command points to a fixed release (`v1.0.0`), not the `main` branch.
 - Log: `/var/log/carry.log`. State: `/etc/carry/`.
 
 ## License
