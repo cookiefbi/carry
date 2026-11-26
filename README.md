@@ -28,9 +28,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install
 
 | Устройство | Приложение |
 |---|---|
-| Android | v2rayNG или Hiddify |
-| iPhone, iPad | Streisand или V2Box |
-| Windows, Mac | Hiddify |
+| Android | [v2rayNG](https://github.com/2dust/v2rayNG) (Google Play или GitHub) |
+| iPhone, iPad, Mac | [OneXray](https://apps.apple.com/app/onexray/id6745748773) (App Store) |
+| Windows | [v2rayN](https://github.com/2dust/v2rayN) |
 
 В приложении нажмите «+» → «Сканировать QR-код». Или скопируйте ссылку `vless://…` и выберите «Импорт из буфера обмена».
 
@@ -84,6 +84,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/cookiefbi/carry/main/install
 
 - Сообщения об ошибках написаны по-русски, рядом подсказка, что делать. Подробности в `/var/log/carry.log`.
 - «Порт 443 занят»: на сервере уже работает веб-сервер или другой VPN. Возьмите чистый сервер или остановите ту программу.
+- v2rayN на Windows показывает «подключено», но сайты не открываются: в настройках v2rayN переключите ядро для VLESS с Xray на sing-box. Это известная проблема v2rayN, к серверу она не относится.
 - Не подключается: попробуйте другой сайт маскировки, например `--sni www.nvidia.com`, а потом заново отсканируйте QR. Если включён Hysteria2, попробуйте запасную ссылку.
 - У некоторых хостеров есть свой файрвол в панели управления. Порт 443 (tcp и udp) должен быть открыт и там.
 
@@ -128,9 +129,9 @@ It asks no questions. After 1–3 minutes you see a big "ГОТОВО" ("done"),
 
 | Device | App |
 |---|---|
-| Android | v2rayNG or Hiddify |
-| iPhone, iPad | Streisand or V2Box |
-| Windows, Mac | Hiddify |
+| Android | [v2rayNG](https://github.com/2dust/v2rayNG) (Google Play or GitHub) |
+| iPhone, iPad, Mac | [OneXray](https://apps.apple.com/app/onexray/id6745748773) (App Store) |
+| Windows | [v2rayN](https://github.com/2dust/v2rayN) |
 
 Tap "+" → "Scan QR code", or copy the `vless://…` link and use "Import from clipboard".
 

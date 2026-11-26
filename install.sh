@@ -583,9 +583,9 @@ banner_done() {
 apps_text() {
   cat <<'EOF'
 Какое приложение скачать:
-  Android ............ v2rayNG или Hiddify (Google Play / GitHub)
-  iPhone, iPad ....... Streisand или V2Box (App Store)
-  Windows, Mac ....... Hiddify (hiddify.com)
+  Android ............ v2rayNG (Google Play или github.com/2dust/v2rayNG)
+  iPhone, iPad, Mac .. OneXray (App Store)
+  Windows ............ v2rayN (github.com/2dust/v2rayN)
 
 Как добавить: в приложении нажмите «+» → «Сканировать QR-код»
 или скопируйте ссылку и выберите «Импорт из буфера обмена».
@@ -968,7 +968,7 @@ textarea{width:100%;box-sizing:border-box;height:110px;font:12px monospace;word-
 button{width:100%;padding:14px;font-size:17px;border:0;border-radius:10px;background:#1a7f37;color:#fff;margin-top:8px}
 p{line-height:1.45}
 </style></head><body><h1>Carry — подключение</h1>
-<p>Скопируйте ссылку и в приложении (v2rayNG, Hiddify, Streisand, V2Box) выберите
+<p>Скопируйте ссылку и в приложении (v2rayNG, OneXray, v2rayN) выберите
 «Импорт из буфера обмена». С другого устройства можно отсканировать QR-код.</p>
 EOF
     while IFS= read -r l; do
